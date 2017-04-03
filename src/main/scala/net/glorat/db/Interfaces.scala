@@ -8,8 +8,8 @@ case class Put(ent: MyValue) extends Command
 case class Invalidate(ent: MyValue) extends Command
 
 case class Defined(id: GUID, key: MyKey) extends DomainEvent
-case class Upserted(id: GUID, ent: MyValue, transactionTime: Instant) extends DomainEvent
-case class Putted(id: GUID, ent: MyValue) extends DomainEvent
+case class Upserted(id: GUID, versionedId: GUID, ent: MyValue, transactionTime: Instant) extends DomainEvent
+case class Putted(id: GUID, versionedId: GUID, ent: MyValue) extends DomainEvent
 case class Invalidated(id: GUID) extends DomainEvent
 
 

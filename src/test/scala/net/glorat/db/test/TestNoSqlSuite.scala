@@ -8,7 +8,7 @@ import org.scalatest._
 /**
   * Created by kevin on 03/04/2017.
   */
-class TestNoSqlSuite extends FlatSpec with org.scalatest.junit.AssertionsForJUnit {
+class TestNoSqlSuite extends FlatSpec {
 
   val id = java.util.UUID.fromString("9d9814f5-f531-4d80-8722-f61dcc1679b8")
   val persistence = new InMemoryPersistenceEngine
@@ -19,7 +19,7 @@ class TestNoSqlSuite extends FlatSpec with org.scalatest.junit.AssertionsForJUni
   val rep = new EventStoreRepository(store)
   val cmds = new MyCommandHandler(rep)
 
-  val bus = new OnDemandEventBus(Seq(NosqlLatestView))
+  val bus = new OnDemandEventBus(Seq(NosqlLatestView, NosqlBlobStore))
 
   // Sync to read by default
   val syncSendCommand: Command => Unit = (cmd => { cmds.receive(cmd); bus.pollEventStream(store.advanced) })
@@ -40,7 +40,10 @@ class TestNoSqlSuite extends FlatSpec with org.scalatest.junit.AssertionsForJUni
   it should "appear in the latest view" in {
     val optValue = SampleDatabase.latest.get(TradeId("foo").toUniqueId)
     assert(optValue.isDefined, "is found")
-    val obj = optValue.get.asInstanceOf[Trade]
+    val versionedId = optValue.get
+    val optObj = NosqlBlobStore.blobStore.get(versionedId)
+    assert (optObj.isDefined, s"should be in blob store with vid ${versionedId}")
+    val obj = optObj.get.asInstanceOf[Trade]
     assert(obj != null, "is a trade")
     assert("foo" == obj.tradeId.id)
   }

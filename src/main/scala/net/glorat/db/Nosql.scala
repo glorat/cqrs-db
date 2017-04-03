@@ -36,8 +36,9 @@ class StoredValue extends AggregateRoot {
     val newTt = Instant.now()
     require(newTt.isAfter(tt), "Server must generate increasing tt")
 
+    val versionedId = java.util.UUID.randomUUID()
     // No invariants to check on upsert
-    applyChange(Upserted(id, ent, newTt))
+    applyChange(Upserted(id, versionedId, ent, newTt))
   }
 
   def invalidate(ent: MyValue) : Unit = {
@@ -69,55 +70,3 @@ class MyCommandHandler(repository: IRepository) extends CommandHandler {
 }
 
 
-
-object SampleDatabase {
-  /** An immediately available but stale and non-RT view of what is latest */
-  var latest : Map[GUID, MyValue] = Map()
-  /** The current replica tt of the latest projection */
-  def latestTransactionTime : Instant = NosqlLatestView.nowTt
-  // var list = List[InventoryItemListDto]()
-}
-
-object NosqlLatestView extends EventStreamReceiver //: Handles<InventoryItemCreated>, Handles<InventoryItemRenamed>, Handles<InventoryItemDeactivated>
-{
-  var nowTt : Instant = new Instant(0)
-
-  def handle(ce: CommitedEvent): Unit = {
-    ce.event match {
-      case a: Upserted => handle(a, ce.streamRevision)
-      case _ => ()
-    }
-  }
-
-  private def handle(message: Upserted, version: Int) = {
-    SampleDatabase.latest = SampleDatabase.latest + (message.ent.key.toUniqueId -> message.ent)
-
-    nowTt = message.transactionTime
-  }
-}
-
-object NosqlLatestIndex extends EventStreamReceiver //: Handles<InventoryItemCreated>, Handles<InventoryItemRenamed>, Handles<InventoryItemDeactivated>
-{
-  // entityType -> indexName -> indexValue -> MyValue
-  val indices : Map[String, Map[String, Map[String, MyValue]]] = Map()
-
-  def handle(ce: CommitedEvent): Unit = {
-    ce.event match {
-      case a: Upserted => handle(a, ce.streamRevision)
-      case _ => ()
-    }
-  }
-
-  private def handle(message: Upserted, version: Int) = {
-    val myValue = message.ent
-    val entityType = myValue.entityType
-    myValue.uniqueKeys.foreach( idx => {
-      updateIndex(entityType, idx.indexName, idx.indexValue, myValue)
-    })
-    SampleDatabase.latest = SampleDatabase.latest + (message.ent.key.toUniqueId -> message.ent)
-  }
-
-  private def updateIndex(entityType:String, indexName:String, indexValue:String, value:MyValue) :  Unit = {
-    ???
-  }
-}
