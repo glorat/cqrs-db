@@ -14,8 +14,10 @@ class TestNoSqlSuite extends FlatSpec {
 
   implicit val ec = ExecutionContext.Implicits.global
 
+  val dbs : Stores = new MemoryStores
+
   val id = java.util.UUID.fromString("9d9814f5-f531-4d80-8722-f61dcc1679b8")
-  val persistence = new InMemoryPersistenceEngine
+  val persistence = dbs.writeDb
   // val persistence = new MongoPersistenceEngine(MongoClient("localhost").getDB("test"), null)
   // persistence.purge
 
@@ -23,13 +25,16 @@ class TestNoSqlSuite extends FlatSpec {
   val rep = new EventStoreRepository(store)
   val cmds = new MyCommandHandler(rep)
 
-  val latestIndex = new NosqlLatestIndex()
-  val bus = new OnDemandEventBus(Seq(NosqlLatestView, NosqlBlobStore, latestIndex), ec)
+
+  val latestIndex = new NosqlLatestIndex(dbs)
+  val latestView = new NosqlLatestView(dbs)
+  val blobStoreView = new NosqlBlobStore(dbs)
+  val bus = new OnDemandEventBus(Seq(latestView, blobStoreView, latestIndex), ec)
 
   // Sync to read by default
   val syncSendCommand: Command => Unit = (cmd => { cmds.receive(cmd); bus.pollEventStream(store.advanced) })
 
-  var initialTt = SampleDatabase.latestTransactionTime
+  var initialTt = latestView.nowTt
 
   "Sending an upsert command" should "produce 1 event " in {
     val something = Trade(TradeId("foo"), "aticket", "bar")
@@ -42,10 +47,10 @@ class TestNoSqlSuite extends FlatSpec {
   }
 
   it should "appear in the latest view" in {
-    val optValue = SampleDatabase.latest.get(TradeId("foo").toUniqueId)
+    val optValue = dbs.latestView.get(TradeId("foo").toUniqueId)
     assert(optValue.isDefined, "is found")
     val versionedId = optValue.get
-    val optObj = NosqlBlobStore.blobStore.get(versionedId)
+    val optObj = dbs.blobStore.get(versionedId)
     assert (optObj.isDefined, s"should be in blob store with vid ${versionedId}")
     val obj = optObj.get.asInstanceOf[Trade]
     assert(obj != null, "is a trade")
@@ -53,7 +58,7 @@ class TestNoSqlSuite extends FlatSpec {
   }
 
   it should "have a transaction time that is higher than before" in {
-    val newTt = SampleDatabase.latestTransactionTime
+    val newTt = latestView.nowTt
     assert(newTt.isAfter(initialTt), s"${newTt} should be newer than initial ${initialTt}")
   }
 
