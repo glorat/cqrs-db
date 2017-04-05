@@ -4,7 +4,7 @@ import CQRS._
 import eventstore._
 import org.joda.time.Instant
 
-import scala.concurrent.Await
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration.Duration
 
 
@@ -51,8 +51,8 @@ class StoredValue extends AggregateRoot {
 
 }
 
-class MyCommandHandler(repository: IRepository, read:ReadFacade) extends CommandHandler {
-  def receive: PartialFunction[Command, Unit] = {
+class MyCommandHandler(repository: IRepository, read:ReadFacade)(implicit ec:ExecutionContext) extends CommandHandler {
+  def receive: PartialFunction[Command, Future[Unit]] = {
     case c: Upsert => handle(c)
   }
 
@@ -60,25 +60,30 @@ class MyCommandHandler(repository: IRepository, read:ReadFacade) extends Command
     val key = c.ent.key.toUniqueId
     val item = repository.getById(key, new StoredValue)
 
-    if (c.opts.checkUniqueKeyConflict) {
+    val uniqueCheck : Future[Unit] = if (c.opts.checkUniqueKeyConflict) {
       // We could check to see if what we are upserting violates indices
       // This is obviously slower and will reduce throughput as we need to roundtrip the indices
       // TODO: Need to ensure that the index projection is up to date wrt to "item" we just loaded and wait until it is
-      val x = read.upsertIsIndexSafe(c.ent.entityType, c.ent.uniqueKeys(0).indexName, c.ent.uniqueKeys(0).indexValue, key)
-      val isSafe = Await.result(x, Duration.Inf)
-      if (!isSafe) throw new IllegalStateException("Upsert wasn't safe on unique indicies")
-    }
-
-    // We don't *really* care if it existed or not before, it's getting saved!
-    if (item.alive) {
-      // inserting
+      val isSafe = read.upsertIsIndexSafe(c.ent.entityType, c.ent.uniqueKeys(0).indexName, c.ent.uniqueKeys(0).indexValue, key)
+      isSafe.map(x => if (!x) {
+        throw new IllegalStateException("Upsert wasn't safe on unique indicies")
+      })
     }
     else {
-      // updating
+      Future.successful()
     }
-    item.upsert(c.ent)
-    // Let's choose our at-least-once semantics to trigger a resave
-    repository.save(item, -1)
+
+    val doUpsert : Future[Unit] = {
+      item.upsert(c.ent)
+      // Let's choose our at-least-once semantics to trigger a resave
+      repository.save(item, -1)
+    }
+
+    // First check, then upsert
+    for {
+      () <- uniqueCheck
+      () <- doUpsert} yield ()
+
   }
 }
 

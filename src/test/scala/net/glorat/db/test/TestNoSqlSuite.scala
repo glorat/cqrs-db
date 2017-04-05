@@ -5,7 +5,8 @@ import eventstore.{InMemoryPersistenceEngine, OptimisticEventStore}
 import net.glorat.db._
 import org.scalatest._
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.duration.Duration
 
 /**
   * Created by kevin on 03/04/2017.
@@ -30,10 +31,14 @@ class TestNoSqlSuite extends FlatSpec {
   val latestIndex = new NosqlLatestIndex(dbs)
   val latestView = new NosqlLatestView(dbs)
   val blobStoreView = new NosqlBlobStore(dbs)
-  val bus = new OnDemandEventBus(Seq(latestView, blobStoreView, latestIndex), ec)
+  val bus = new OnDemandEventBus(Seq(latestView, blobStoreView, latestIndex))
 
   // Sync to read by default
-  val syncSendCommand: Command => Unit = (cmd => { cmds.receive(cmd); bus.pollEventStream(store.advanced) })
+  val syncSendCommand: Command => Unit = (cmd => {
+    val cmdFuture = cmds.receive(cmd);
+    Await.result(cmdFuture, Duration.Inf)
+    bus.pollEventStream(store.advanced)
+  })
 
   var initialTt = latestView.nowTt
 
@@ -89,7 +94,7 @@ class TestNoSqlSuite extends FlatSpec {
     assert(latestIndex.badEventCount == 1)
   }
 
-  "Sending a conflicting index update with checkout" should "fail command" in {
+  "Sending a conflicting index update with checking" should "fail command" in {
     val conflict = Trade(TradeId("conflicting"), "aticket", "bar")
     assertThrows[IllegalStateException] {
       syncSendCommand(Upsert(conflict, UpsertOpts(checkUniqueKeyConflict = true)))
