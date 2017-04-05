@@ -23,7 +23,8 @@ class TestNoSqlSuite extends FlatSpec {
 
   val store = new OptimisticEventStore(persistence, Seq())
   val rep = new EventStoreRepository(store)
-  val cmds = new MyCommandHandler(rep)
+  val read = new ReadFacade(dbs)
+  val cmds = new MyCommandHandler(rep,  read)
 
 
   val latestIndex = new NosqlLatestIndex(dbs)
@@ -77,14 +78,21 @@ class TestNoSqlSuite extends FlatSpec {
     assert(latestIndex.badEventCount == 0)
   }
 
-  "Sending a conflicting index update" should "produce 1 event" in {
+  "Sending a conflicting index update without checking" should "produce 1 event" in {
     val conflict = Trade(TradeId("conflicting"), "aticket", "bar")
-    syncSendCommand(Upsert(conflict))
+    syncSendCommand(Upsert(conflict, UpsertOpts(checkUniqueKeyConflict = false)))
     val evs = store.advanced.getFrom(0).flatMap(_.events).map(em => em.body.asInstanceOf[DomainEvent])
     assert( 3 == evs.size)
   }
 
   it should "be an invalid index update" in{
     assert(latestIndex.badEventCount == 1)
+  }
+
+  "Sending a conflicting index update with checkout" should "fail command" in {
+    val conflict = Trade(TradeId("conflicting"), "aticket", "bar")
+    assertThrows[IllegalStateException] {
+      syncSendCommand(Upsert(conflict, UpsertOpts(checkUniqueKeyConflict = true)))
+    }
   }
 }

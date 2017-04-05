@@ -3,7 +3,9 @@ package net.glorat.db
 import CQRS._
 import org.joda.time.Instant
 
-case class Upsert(ent: MyValue) extends Command
+case class UpsertOpts (checkUniqueKeyConflict:Boolean = true)
+
+case class Upsert(ent: MyValue, opts:UpsertOpts = UpsertOpts()) extends Command
 case class Put(ent: MyValue) extends Command
 case class Invalidate(ent: MyValue) extends Command
 

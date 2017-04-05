@@ -4,6 +4,9 @@ import CQRS._
 import eventstore._
 import org.joda.time.Instant
 
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
+
 
 
 class StoredValue extends AggregateRoot {
@@ -48,7 +51,7 @@ class StoredValue extends AggregateRoot {
 
 }
 
-class MyCommandHandler(repository: IRepository) extends CommandHandler {
+class MyCommandHandler(repository: IRepository, read:ReadFacade) extends CommandHandler {
   def receive: PartialFunction[Command, Unit] = {
     case c: Upsert => handle(c)
   }
@@ -56,6 +59,16 @@ class MyCommandHandler(repository: IRepository) extends CommandHandler {
   private def handle(c: Upsert) = {
     val key = c.ent.key.toUniqueId
     val item = repository.getById(key, new StoredValue)
+
+    if (c.opts.checkUniqueKeyConflict) {
+      // We could check to see if what we are upserting violates indices
+      // This is obviously slower and will reduce throughput as we need to roundtrip the indices
+      // TODO: Need to ensure that the index projection is up to date wrt to "item" we just loaded and wait until it is
+      val x = read.upsertIsIndexSafe(c.ent.entityType, c.ent.uniqueKeys(0).indexName, c.ent.uniqueKeys(0).indexValue, key)
+      val isSafe = Await.result(x, Duration.Inf)
+      if (!isSafe) throw new IllegalStateException("Upsert wasn't safe on unique indicies")
+    }
+
     // We don't *really* care if it existed or not before, it's getting saved!
     if (item.alive) {
       // inserting
